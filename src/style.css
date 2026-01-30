@@ -457,6 +457,13 @@ button:active {
   margin-top: 6px;
 }
 
+.delete-selected {
+  border-color: #f87171;
+  box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.6),
+              0 0 12px rgba(248, 113, 113, 0.35);
+  background: rgba(248, 113, 113, 0.06);
+}
+
 
 
 /* =========================

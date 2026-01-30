@@ -32,6 +32,8 @@ type MemoryFieldKey =
 type ConversationMode =
   | "capturing"
   | "review"
+  | "editing"
+  | "confirm"
   | "reflecting";
 
 /* ---------------- Conversation Flow ---------------- */
@@ -69,6 +71,9 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [suggestedMemoryIndexes, setSuggestedMemoryIndexes] = useState<number[]>([]);
 
+  const [deleteMode, setDeleteMode] = useState(false);
+  const [deleteIndexes, setDeleteIndexes] = useState<number[]>([]);
+
 
   /* ---------------- AI Mode ---------------- */
 
@@ -98,6 +103,12 @@ export default function App() {
   const [conversationMode, setConversationMode] =
     useState<ConversationMode>("capturing");
 
+  const showActions =
+    conversationMode === "review" ||
+    conversationMode === "editing" ||
+    conversationMode === "confirm" ||
+    conversationMode === "reflecting";
+
   const [memory, setMemory] = useState<Omit<DecisionMemory, "id">>({
     decision: "",
     intent: "",
@@ -109,12 +120,34 @@ export default function App() {
   const [savedMemories, setSavedMemories] =
     useState<DecisionMemory[]>([]);
 
+  /* ---------------- Load Saved Memories ---------------- */
+  useEffect(() => {
+    const stored = localStorage.getItem("thinkly_memories");
+    if (stored) {
+      try {
+        setSavedMemories(JSON.parse(stored));
+      } catch (e) {
+        console.error("Failed to load saved memories", e);
+      }
+    }
+  }, []);
+
+
   const [selectedMemoryIndexes, setSelectedMemoryIndexes] =
     useState<number[]>([]);
 
   const [flashcardView, setFlashcardView] = useState<
     "active" | "archived"
   >("active");
+
+  /* ---------------- Persist Memories ---------------- */
+  useEffect(() => {
+    localStorage.setItem(
+      "thinkly_memories",
+      JSON.stringify(savedMemories)
+    );
+  }, [savedMemories]);
+
 
   /* ---------------- Startup ---------------- */
   useEffect(() => {
@@ -301,17 +334,15 @@ Reasoning: ${memory.reasoning}`
           role: "ai",
           text:
             `Here’s a clear snapshot of what you’ve shared.
-
-            You’re now in Review Mode. <br>
-            • Editing is paused to preserve clarity <br>
-            • You can still edit fields manually <br>
-            • Choose one of the actions below when ready <br>`,
-
-            
+        
+    You can now review everything.
+    • Edit any field if needed
+    • Confirm when you’re ready to save`,
         },
       ]);
       setConversationMode("review");
     }
+
 
     setInput("");
   };
@@ -680,20 +711,6 @@ Alternatives: ${m.alternatives || "—"}`
           </div>
               
 
-          <div style={{ marginTop: "12px" }}>
-            <label style={{ fontSize: "0.85rem", color: "#6b7280" }}>
-              AI Mode:
-            </label>
-            <select
-              value={aiMode}
-              onChange={(e) => setAiMode(e.target.value as "online" | "offline")}
-              style={{ marginLeft: "8px" }}
-            >
-              <option value="online">Cloud (GPT)</option>
-              <option value="offline">Local (Ollama)</option>
-            </select>
-          </div>
-
           <div className="main-grid">
 
             {/* Conversation */}
@@ -716,7 +733,7 @@ Alternatives: ${m.alternatives || "—"}`
                 <div className="input-row">
                   {conversationMode === "review" ? (
                     <div className="review-message">
-                      Review mode — choose Save or Ask AI to continue
+                      Review mode — choose Save, Edit or Ask AI to continue
                     </div>
                   ) : (
                     <>
@@ -751,31 +768,53 @@ Alternatives: ${m.alternatives || "—"}`
             <div className="panel">
               <h2 className="font-semibold mb-4">Decision Summary</h2>
 
-              <MemoryField label="Decision" value={memory.decision} onChange={(v) => setMemory((m) => ({ ...m, decision: v }))} disabled={conversationMode !== "capturing"}/>
-              <MemoryField label="Intent" value={memory.intent} onChange={(v) => setMemory((m) => ({ ...m, intent: v }))} disabled={conversationMode !== "capturing"} />
-              <MemoryField label="Constraints" value={memory.constraints} onChange={(v) => setMemory((m) => ({ ...m, constraints: v }))} disabled={conversationMode !== "capturing"}/>
-              <MemoryField label="Alternatives" value={memory.alternatives} onChange={(v) => setMemory((m) => ({ ...m, alternatives: v }))} disabled={conversationMode !== "capturing"}/>
-              <MemoryField label="Reasoning" value={memory.reasoning} onChange={(v) => setMemory((m) => ({ ...m, reasoning: v }))} disabled={conversationMode !== "capturing"}/>
+              <MemoryField label="Decision" value={memory.decision} onChange={(v) => setMemory((m) => ({ ...m, decision: v }))} disabled={conversationMode === "confirm"} />
+              <MemoryField label="Intent" value={memory.intent} onChange={(v) => setMemory((m) => ({ ...m, intent: v }))} disabled={conversationMode === "confirm"} />
+              <MemoryField label="Constraints" value={memory.constraints} onChange={(v) => setMemory((m) => ({ ...m, constraints: v }))} disabled={conversationMode === "confirm"}/>
+              <MemoryField label="Alternatives" value={memory.alternatives} onChange={(v) => setMemory((m) => ({ ...m, alternatives: v }))} disabled={conversationMode === "confirm"}/>
+              <MemoryField label="Reasoning" value={memory.reasoning} onChange={(v) => setMemory((m) => ({ ...m, reasoning: v }))} disabled={conversationMode === "confirm"}/>
 
               {canSave && (
                 <>
                   <pre className="summary-output">{synthesis}</pre>
 
-                  {conversationMode === "review" && (
-                    <p className="review-message">
-                      Review actions
-                    </p>
+                  {canSave && showActions && (
+                    <>
+                      {/* Edit & Confirm always visible after review */}
+                      <div className="action-row">
+                        <button
+                          className="edit-btn"
+                          onClick={() => setConversationMode("editing")}
+                        >
+                          Edit
+                        </button>
+                                    
+                        <button
+                          className="confirm-btn"
+                          onClick={() => setConversationMode("confirm")}
+                        >
+                          Confirm
+                        </button>
+                      </div>
+                                    
+                      {/* Ask AI always visible */}
+                      <div className="action-row">
+                        <button className="ask-ai-btn" onClick={askAIForAdvice}>
+                          Ask AI
+                        </button>
+                                    
+                        {/* Save only after confirm */}
+                        {conversationMode === "confirm" && (
+                          <button className="save-btn" onClick={saveDecision}>
+                            Save
+                          </button>
+                        )}
+                      </div>
+                    </>
                   )}
+                  
 
-                  <div className="action-row">
-                    <button className="save-btn" onClick={saveDecision}>
-                      Save
-                    </button>
 
-                    <button className="ask-ai-btn" onClick={askAIForAdvice}>
-                      Ask AI
-                    </button>
-                  </div>
                 </>
               )}
             </div>
