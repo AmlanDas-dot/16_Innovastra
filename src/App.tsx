@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import OpenAI from "openai";
 import { useRef } from "react";
 
 /* ---------------- Types ---------------- */
@@ -77,20 +76,7 @@ export default function App() {
 
   /* ---------------- AI Mode ---------------- */
 
-  const [aiMode, setAiMode] = useState<"online" | "offline">(() => {
-    return (localStorage.getItem("aiMode") as "online" | "offline") || "online";
-  });
-
-  useEffect(() => {
-    localStorage.setItem("aiMode", aiMode);
-  }, [aiMode]);
-
-
-  /* ---------------- OpenAI ---------------- */
-  const openai = new OpenAI({
-    apiKey: import.meta.env.VITE_OPENAI_API_KEY,
-    dangerouslyAllowBrowser: true,
-  });
+  const aiMode: "offline" = "offline";
 
   /* ---------------- State ---------------- */
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -120,6 +106,8 @@ export default function App() {
   const [savedMemories, setSavedMemories] =
     useState<DecisionMemory[]>([]);
 
+  const [hasLoadedMemories, setHasLoadedMemories] = useState(false);
+
   /* ---------------- Load Saved Memories ---------------- */
   useEffect(() => {
     const stored = localStorage.getItem("thinkly_memories");
@@ -130,6 +118,7 @@ export default function App() {
         console.error("Failed to load saved memories", e);
       }
     }
+    setHasLoadedMemories(true);
   }, []);
 
 
@@ -142,11 +131,14 @@ export default function App() {
 
   /* ---------------- Persist Memories ---------------- */
   useEffect(() => {
+    if (!hasLoadedMemories) return;
+
     localStorage.setItem(
       "thinkly_memories",
       JSON.stringify(savedMemories)
     );
-  }, [savedMemories]);
+  }, [savedMemories, hasLoadedMemories]);
+
 
 
   /* ---------------- Startup ---------------- */
@@ -350,45 +342,32 @@ Reasoning: ${memory.reasoning}`
 
   /* ---------------- Save Decision ---------------- */
 
-const generateAI = async ({
-  system,
-  user,
-}: {
-  system: string;
-  user: string;
-}) => {
-  // ONLINE (GPT)
-  if (aiMode === "online") {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-    });
+  /* ---------------- AI Core ---------------- */
 
-    return response.choices[0]?.message?.content ?? "";
-  }
-
-  // OFFLINE (Ollama)
-  const res = await fetch("http://localhost:11434/api/generate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "llama3.1:8b",
-      prompt: `${system}\n\n${user}`,
-      stream: false,
-    }),
-  });
-
-  if (!res.ok) {
-    throw new Error("Ollama request failed");
-  }
-
-  const data = await res.json();
-  return data.response ?? "";
-};
-
+    const generateAI = async ({
+      system,
+      user,
+    }: {
+      system: string;
+      user: string;
+    }) => {
+      const res = await fetch("http://localhost:11434/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "llama3.1:8b",
+          prompt: `SYSTEM:\n${system}\n\nUSER:\n${user}`,
+          stream: false,
+        }),
+      });
+    
+      if (!res.ok) {
+        throw new Error("Local AI (Ollama) is not running");
+      }
+    
+      const data = await res.json();
+      return data.response ?? "";
+    };
 
 
   const generateSummary = async (memory: {
@@ -401,16 +380,20 @@ const generateAI = async ({
     try {
       return (
         await generateAI({
-          system: `You summarize completed personal decisions.
+          system: `You are running locally on the user's device.
+          You do not send or receive data from the internet.
 
-  Rules:
-  - ONE sentence only
-  - Max 30 words
-  - Past tense
-  - Neutral and factual
-  - No advice
-  - No judgment
-  - No new information`,
+          You summarize completed personal decisions.
+
+          Rules:
+          - ONE sentence only
+          - Max 30 words
+          - Past tense
+          - Neutral and factual
+          - No advice
+          - No judgment
+          - No new information`,
+
           user: `Decision:
   ${memory.decision}
 
@@ -437,6 +420,8 @@ const generateAI = async ({
 
 
   const saveDecision = async () => {
+    if (!hasLoadedMemories) return;
+    
     const summary = await generateSummary(memory);
 
     setSavedMemories((prev) => [
@@ -492,14 +477,18 @@ Alternatives: ${m.alternatives || "—"}`
 
     try {
       const aiText = await generateAI({
-        system: `You are an advisory assistant helping a human reflect on a decision.
+        system: `You are running locally on the user's device.
+        You do not send or receive data from the internet.
 
-  Rules:
-  - Do NOT make decisions for the user
-  - Do NOT add new facts
-  - Do NOT modify or reinterpret the decision
-  - Use only the provided context
-  - Be concise and structured`,
+        You are an advisory assistant helping a human reflect on a decision.
+
+        Rules:
+        - Do NOT make decisions for the user
+        - Do NOT add new facts
+        - Do NOT modify or reinterpret the decision
+        - Use only the provided context
+        - Be concise and structured`,
+
         user: `Here is the confirmed decision context:
 
   ${synthesis}
@@ -545,14 +534,18 @@ Alternatives: ${m.alternatives || "—"}`
 
     try {
       const aiText = await generateAI({
-        system: `You are a reflective thinking assistant.
+        system: `You are running locally on the user's device.
+        You do not send or receive data from the internet.
 
-  Rules:
-  - Do NOT make decisions for the user
-  - Do NOT change the decision fields
-  - Respond only to the user's question or thought
-  - Stay grounded in the provided decision context
-  - Be concise, calm, and thoughtful`,
+        You are a reflective thinking assistant.
+
+        Rules:
+        - Do NOT make decisions for the user
+        - Do NOT change the decision fields
+        - Respond only to the user's question or thought
+        - Stay grounded in the provided decision context
+        - Be concise, calm, and thoughtful`,
+
         user: `Decision context:
   ${synthesis}
 
@@ -689,27 +682,9 @@ Alternatives: ${m.alternatives || "—"}`
             <p className="subtitle">AI supports your thinking. You make the choice.</p>
           </header>
 
-          <div className="ai-toggle-row">
-            <span className={`ai-label ${aiMode === "online" ? "active" : ""}`}>
-              Cloud (GPT)
-            </span>
-                    
-            <label className="ai-switch">
-              <input
-                type="checkbox"
-                checked={aiMode === "offline"}
-                onChange={() =>
-                  setAiMode((prev) => (prev === "online" ? "offline" : "online"))
-                }
-              />
-              <span className="ai-slider" />
-            </label>
-              
-            <span className={`ai-label ${aiMode === "offline" ? "active" : ""}`}>
-              Local (Ollama)
-            </span>
-          </div>
-              
+          <p className="text-xs text-[#7e838c] italic mb-4">
+            Your data is safe. Fully offline only. (Ollama)
+          </p>              
 
           <div className="main-grid">
 
